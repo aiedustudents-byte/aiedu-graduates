@@ -1,6 +1,6 @@
 [build]
   base = "project"
-  publish = "project/dist"
+  publish = "dist"
   command = "npm run build"
 
 # Configure secrets scanning to ignore VITE_GEMINI_API_KEY
