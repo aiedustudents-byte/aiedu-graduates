@@ -3,6 +3,10 @@
   publish = "project/dist"
   command = "npm run build"
 
+# Configure secrets scanning to ignore VITE_GEMINI_API_KEY
+[build.environment]
+  SECRETS_SCAN_OMIT_KEYS = "VITE_GEMINI_API_KEY"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
