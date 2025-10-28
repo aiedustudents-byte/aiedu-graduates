@@ -23,8 +23,9 @@ export default function AIMentor() {
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Initialize Gemini AI with 2.0 Flash model
-  const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+  // Initialize Gemini AI with 2.0 Flash model (only if API key is available)
+  const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  const genAI = geminiApiKey ? new GoogleGenerativeAI(geminiApiKey) : null;
 
   async function handleSendMessage() {
     if (!inputText.trim() || isLoading) return;
@@ -41,6 +42,11 @@ export default function AIMentor() {
     setIsLoading(true);
 
     try {
+      // Check if Gemini API is available
+      if (!genAI) {
+        throw new Error('Gemini API key not configured');
+      }
+
       // Get the Gemini 2.0 Flash model
       const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
 
@@ -75,7 +81,7 @@ export default function AIMentor() {
       
       const errorResponse: Message = {
         id: (Date.now() + 1).toString(),
-        text: 'Sorry, I encountered an error while processing your request. Please check your API key and internet connection, then try again.',
+        text: 'Sorry, the AI Mentor feature is currently unavailable. Please contact your administrator to configure the Gemini API key.',
         sender: 'ai',
         timestamp: new Date(),
       };
@@ -97,7 +103,9 @@ export default function AIMentor() {
           <div className="flex items-center justify-between">
             <div className="flex-1">
               <h1 className="text-4xl font-bold text-warm-brown mb-3">Ask AI Mentor</h1>
-              <p className="text-medium-gray text-lg mb-4">Powered by Google Gemini 2.0 Flash</p>
+              <p className="text-medium-gray text-lg mb-4">
+                {geminiApiKey ? 'Powered by Google Gemini 2.0 Flash' : 'AI Mentor (Configuration Required)'}
+              </p>
               <div className="flex items-center gap-6 text-sm text-medium-gray">
                 <div className="flex items-center gap-2">
                   <Bot className="w-4 h-4 text-warm-brown" />
