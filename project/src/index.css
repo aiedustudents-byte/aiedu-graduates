@@ -1,0 +1,177 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Times New Roman', serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #f5f1ed;
+  color: #252323;
+  line-height: 1.6;
+}
+
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(120, 6, 6, 0.1); /* #780606/10 */
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #780606; /* solid #780606 */
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #5A0404; /* solid darker #780606 */
+}
+
+/* Utility Classes */
+@layer utilities {
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  
+  .gradient-text {
+    color: #780606; /* solid warm-brown */
+  }
+  
+  .glass-effect {
+    background: rgba(245, 241, 237, 0.8);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(218, 210, 188, 0.2);
+  }
+  
+  .hover-lift {
+    transition: all 0.3s ease;
+  }
+  
+  .hover-lift:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  }
+}
+
+/* Component Styles */
+@layer components {
+  .btn-primary {
+    @apply bg-warm-brown text-white font-medium px-6 py-3 rounded-button shadow-soft hover:shadow-hover transition-all duration-300 hover:scale-105;
+  }
+  
+  .btn-secondary {
+    @apply bg-btn-secondary text-text-primary font-medium px-6 py-3 rounded-button shadow-soft hover:shadow-hover transition-all duration-300 hover:scale-105;
+  }
+  
+  .card-modern {
+    @apply bg-card-bg rounded-card shadow-card hover:shadow-hover transition-all duration-300 p-6;
+  }
+  
+  .sidebar-gradient {
+    background: #f5f1ed;
+  }
+  
+  .admin-sidebar-gradient {
+    background: #f5f1ed;
+  }
+  
+  /* Question Highlighting */
+  .question-highlight {
+    background: linear-gradient(120deg, #ffd700 0%, #ffed4e 100%);
+    color: #252323;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+    box-shadow: 0 2px 4px rgba(255, 215, 0, 0.3);
+    border-left: 3px solid #ffd700;
+    display: inline-block;
+    margin: 0 2px;
+  }
+  
+  .question-highlight:hover {
+    background: linear-gradient(120deg, #ffed4e 0%, #ffd700 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(255, 215, 0, 0.4);
+  }
+  
+  /* Hide YouTube suggested videos overlay */
+  iframe[src*="youtube.com/embed"] {
+    position: relative;
+  }
+  
+  iframe[src*="youtube.com/embed"]::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: transparent;
+    pointer-events: none;
+    z-index: 1;
+  }
+  
+  /* Hide YouTube overlay elements */
+  .ytp-endscreen-content,
+  .ytp-endscreen-preview,
+  .ytp-endscreen-element,
+  .ytp-suggested-action,
+  .ytp-endscreen-next,
+  .ytp-endscreen-previous,
+  .ytp-endscreen-playlist,
+  .ytp-endscreen-playlist-header,
+  .ytp-endscreen-playlist-item,
+  .ytp-endscreen-playlist-item-thumbnail,
+  .ytp-endscreen-playlist-item-title,
+  .ytp-endscreen-playlist-item-duration,
+  .ytp-endscreen-playlist-item-author,
+  .ytp-endscreen-playlist-item-view-count,
+  .ytp-endscreen-playlist-item-published,
+  .ytp-endscreen-playlist-item-description,
+  .ytp-endscreen-playlist-item-metadata,
+  .ytp-endscreen-playlist-item-metadata-line,
+  .ytp-endscreen-playlist-item-metadata-line-text,
+  .ytp-endscreen-playlist-item-metadata-line-text-link,
+  .ytp-endscreen-playlist-item-metadata-line-text-link:hover,
+  .ytp-endscreen-playlist-item-metadata-line-text-link:visited,
+  .ytp-endscreen-playlist-item-metadata-line-text-link:active,
+  .ytp-endscreen-playlist-item-metadata-line-text-link:focus,
+  .ytp-endscreen-playlist-item-metadata-line-text-link:target,
+  .ytp-endscreen-playlist-item-metadata-line-text-link:link,
+  .ytp-endscreen-playlist-item-metadata-line-text-link:any-link,
+  .ytp-endscreen-playlist-item-metadata-line-text-link:any-link:hover,
+  .ytp-endscreen-playlist-item-metadata-line-text-link:any-link:visited,
+  .ytp-endscreen-playlist-item-metadata-line-text-link:any-link:active,
+  .ytp-endscreen-playlist-item-metadata-line-text-link:any-link:focus,
+  .ytp-endscreen-playlist-item-metadata-line-text-link:any-link:target,
+  .ytp-endscreen-playlist-item-metadata-line-text-link:any-link:link {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    height: 0 !important;
+    width: 0 !important;
+    overflow: hidden !important;
+  }
+}
