@@ -15,14 +15,16 @@ To deploy this application on Netlify, you need to set the following environment
 #### Firebase Configuration (Required)
 
 ```
-VITE_FIREBASE_API_KEY = AIzaSyDIgwHL2_oAbcTr9jpGcURnTseIaAkica4
-VITE_FIREBASE_AUTH_DOMAIN = ai-edu-graduates.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID = ai-edu-graduates
-VITE_FIREBASE_STORAGE_BUCKET = ai-edu-graduates.firebasestorage.app
-VITE_FIREBASE_MESSAGING_SENDER_ID = 745004327373
-VITE_FIREBASE_APP_ID = 1:745004327373:web:3fa580fdda4cc48080e484
-VITE_FIREBASE_MEASUREMENT_ID = G-2FDRK3JRBV
+VITE_FIREBASE_API_KEY = your_firebase_api_key
+VITE_FIREBASE_AUTH_DOMAIN = your_project_id.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID = your_project_id
+VITE_FIREBASE_STORAGE_BUCKET = your_project_id.firebasestorage.app
+VITE_FIREBASE_MESSAGING_SENDER_ID = your_messaging_sender_id
+VITE_FIREBASE_APP_ID = your_app_id
+VITE_FIREBASE_MEASUREMENT_ID = your_measurement_id
 ```
+
+**Note**: Get these values from your Firebase Console → Project Settings → General → Your apps section.
 
 #### Gemini API Key (Optional)
 
