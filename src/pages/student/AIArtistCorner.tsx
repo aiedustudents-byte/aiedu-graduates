@@ -868,13 +868,8 @@ function CreatePostModal({ onClose, onPostCreated, userPoints }: { onClose: () =
 
     setUploading(true);
     try {
-      // Step 1: Upload image with compression and timeout
-      const uploadPromise = handleImageUpload(formData.image);
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Upload timeout')), 8000)
-      );
-      
-      const imageUrl = await Promise.race([uploadPromise, timeoutPromise]) as string;
+      // Step 1: Upload image with compression (allows longer uploads on production)
+      const imageUrl = await handleImageUpload(formData.image);
       
       // Step 2: Create post data
       const postData = {
@@ -922,11 +917,7 @@ function CreatePostModal({ onClose, onPostCreated, userPoints }: { onClose: () =
       onPostCreated();
     } catch (error) {
       console.error('Error creating post:', error);
-      if (error instanceof Error && error.message === 'Upload timeout') {
-        alert('Upload is taking too long. Please try with a smaller image.');
-      } else {
-        alert('Failed to upload post. Please try again with a smaller image.');
-      }
+      alert('Failed to upload post. Please check your connection or try again with a smaller image.');
     } finally {
       setUploading(false);
     }
