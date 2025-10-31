@@ -836,9 +836,19 @@ function CreatePostModal({ onClose, onPostCreated, userPoints }: { onClose: () =
     }
     
     try {
-      const imageRef = ref(storage, `art-posts/${Date.now()}-${compressedFile.name}`);
-      const snapshot = await uploadBytes(imageRef, compressedFile);
-      const downloadURL = await getDownloadURL(snapshot.ref);
+      const uploadTask = async () => {
+        const imageRef = ref(storage, `art-posts/${Date.now()}-${compressedFile.name}`);
+        const snapshot = await uploadBytes(imageRef, compressedFile);
+        return await getDownloadURL(snapshot.ref);
+      };
+
+      // Give Firebase upload 12s; if it fails or times out, fallback to base64
+      const downloadURL = await Promise.race([
+        uploadTask(),
+        new Promise<string>((_, reject) =>
+          setTimeout(() => reject(new Error('upload-timeout')), 12000)
+        )
+      ]);
       return downloadURL;
     } catch (error) {
       console.error('Firebase Storage failed, using base64 fallback:', error);
@@ -868,7 +878,7 @@ function CreatePostModal({ onClose, onPostCreated, userPoints }: { onClose: () =
 
     setUploading(true);
     try {
-      // Step 1: Upload image with compression (allows longer uploads on production)
+      // Step 1: Upload image (Firebase storage with timeout + base64 fallback in handleImageUpload)
       const imageUrl = await handleImageUpload(formData.image);
       
       // Step 2: Create post data
