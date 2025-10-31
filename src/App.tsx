@@ -16,6 +16,7 @@ import AIDigest from './pages/student/AIDigest';
 import AIMentor from './pages/student/AIMentor';
 import AIArtistCorner from './pages/student/AIArtistCorner';
 import Profile from './pages/student/Profile';
+import WellnessCorner from './pages/student/WellnessCorner';
 
 import AdminDashboard from './pages/admin/AdminDashboard';
 import ManageCourses from './pages/admin/ManageCourses';
@@ -28,6 +29,7 @@ import ViewStudents from './pages/admin/ViewStudents';
 import ManageAITools from './pages/admin/ManageAITools';
 import ManageSimulatorTasks from './pages/admin/ManageSimulatorTasks';
 import ManageAIArtistCorner from './pages/admin/ManageAIArtistCorner';
+import ManageWellness from './pages/admin/ManageWellness';
 
 function AppContent() {
   const location = useLocation();
@@ -83,6 +85,7 @@ function AppContent() {
           <Route path="/career" element={<CareerBooster />} />
           <Route path="/digest" element={<AIDigest />} />
           <Route path="/mentor" element={<AIMentor />} />
+          <Route path="/wellness" element={<WellnessCorner />} />
           <Route path="/ai-artist-corner" element={<AIArtistCorner />} />
           <Route path="/profile" element={<Profile />} />
 
@@ -97,6 +100,7 @@ function AppContent() {
           <Route path="/admin/students" element={<ViewStudents />} />
           <Route path="/admin/simulator-tasks" element={<ManageSimulatorTasks />} />
           <Route path="/admin/ai-artist-corner" element={<ManageAIArtistCorner />} />
+          <Route path="/admin/wellness" element={<ManageWellness />} />
         </Routes>
       </main>
     </div>

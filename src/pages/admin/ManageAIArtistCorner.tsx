@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import Card from '../../components/Card';
 import { db } from '../../lib/firebase';
-import { collection, getDocs, doc, updateDoc, deleteDoc, query, orderBy, where, getDoc, setDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, deleteDoc, query, orderBy, where, getDoc, setDoc, addDoc, Timestamp } from 'firebase/firestore';
 
 interface ArtPost {
   id: string;
@@ -70,6 +70,18 @@ export default function ManageAIArtistCorner() {
   const [selectedPost, setSelectedPost] = useState<ArtPost | null>(null);
   const [pointsToGive, setPointsToGive] = useState<number | ''>('');
   const [userPointsData, setUserPointsData] = useState<{[userId: string]: any}>({});
+  // Challenges management state
+  const [challenges, setChallenges] = useState<any[]>([]);
+  const [challengeSubmissions, setChallengeSubmissions] = useState<any[]>([]);
+  const [selectedChallengeForSubmissions, setSelectedChallengeForSubmissions] = useState<string | null>(null);
+  const [newChallenge, setNewChallenge] = useState({
+    title: '',
+    description: '',
+    theme: '',
+    prize: '',
+    startDate: '',
+    endDate: ''
+  });
 
   useEffect(() => {
     fetchData();
@@ -81,7 +93,9 @@ export default function ManageAIArtistCorner() {
         fetchPosts(),
         fetchUserStats(),
         fetchOverallStats(),
-        fetchUserPoints()
+        fetchUserPoints(),
+        fetchChallenges(),
+        fetchChallengeSubmissions()
       ]);
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -101,6 +115,78 @@ export default function ManageAIArtistCorner() {
       setUserPointsData(pointsMap);
     } catch (error) {
       console.error('Error fetching user points:', error);
+    }
+  };
+
+  const fetchChallenges = async () => {
+    try {
+      const snapshot = await getDocs(collection(db, 'challenges'));
+      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      setChallenges(data);
+    } catch (e) {
+      console.error('Error fetching challenges', e);
+    }
+  };
+
+  const fetchChallengeSubmissions = async () => {
+    try {
+      const snapshot = await getDocs(collection(db, 'challengeSubmissions'));
+      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      setChallengeSubmissions(data);
+    } catch (e) {
+      console.error('Error fetching challenge submissions', e);
+    }
+  };
+
+  const createChallenge = async () => {
+    const { title, description, theme, prize, startDate, endDate } = newChallenge;
+    if (!title || !description || !theme || !startDate || !endDate) {
+      alert('Please fill title, description, theme, start and end dates.');
+      return;
+    }
+    try {
+      await addDoc(collection(db, 'challenges'), {
+        title,
+        description,
+        theme,
+        prize: prize || 'Community shout-out + 100 pts',
+        startDate: Timestamp.fromDate(new Date(startDate)),
+        endDate: Timestamp.fromDate(new Date(endDate)),
+        participants: 0,
+        submissions: 0,
+        status: 'upcoming'
+      });
+      setNewChallenge({ title: '', description: '', theme: '', prize: '', startDate: '', endDate: '' });
+      await Promise.all([fetchChallenges(), fetchChallengeSubmissions()]);
+      alert('Challenge created successfully.');
+    } catch (e) {
+      console.error('Error creating challenge', e);
+      alert('Failed to create challenge.');
+    }
+  };
+
+  const endChallenge = async (id: string) => {
+    try {
+      await updateDoc(doc(db, 'challenges', id), { status: 'ended' });
+      await Promise.all([fetchChallenges(), fetchChallengeSubmissions()]);
+    } catch (e) {
+      console.error('Error ending challenge', e);
+    }
+  };
+
+  const deleteChallenge = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this challenge? This will also remove all submissions.')) {
+      return;
+    }
+    try {
+      await deleteDoc(doc(db, 'challenges', id));
+      // Also delete related submissions
+      const subsToDelete = challengeSubmissions.filter((s: any) => s.challengeId === id);
+      await Promise.all(subsToDelete.map((sub: any) => deleteDoc(doc(db, 'challengeSubmissions', sub.id))));
+      await Promise.all([fetchChallenges(), fetchChallengeSubmissions()]);
+      setSelectedChallengeForSubmissions(null);
+    } catch (e) {
+      console.error('Error deleting challenge', e);
     }
   };
 
@@ -388,8 +474,7 @@ export default function ManageAIArtistCorner() {
           </div>
         </Card>
       </motion.div>
-
-      {/* Stats Cards */}
+      {/* Stats Cards - keep at top */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {statCards.map((stat, index) => {
           const Icon = stat.icon;
@@ -417,6 +502,230 @@ export default function ManageAIArtistCorner() {
           );
         })}
       </div>
+
+      {/* Create Challenge */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.35 }}
+      >
+        <h3 className="text-xl font-semibold text-text-primary mb-4">Post New Challenge</h3>
+        <Card>
+          <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <input
+              className="px-3 py-2 border border-light-accent rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-warm-brown/20"
+              placeholder="Title"
+              value={newChallenge.title}
+              onChange={(e) => setNewChallenge({ ...newChallenge, title: e.target.value })}
+            />
+            <input
+              className="px-3 py-2 border border-light-accent rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-warm-brown/20"
+              placeholder="Theme (e.g., Neon Nature)"
+              value={newChallenge.theme}
+              onChange={(e) => setNewChallenge({ ...newChallenge, theme: e.target.value })}
+            />
+            <input
+              className="px-3 py-2 md:col-span-2 border border-light-accent rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-warm-brown/20"
+              placeholder="Short description"
+              value={newChallenge.description}
+              onChange={(e) => setNewChallenge({ ...newChallenge, description: e.target.value })}
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <input
+                type="date"
+                className="px-3 py-2 border border-light-accent rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-warm-brown/20"
+                value={newChallenge.startDate}
+                onChange={(e) => setNewChallenge({ ...newChallenge, startDate: e.target.value })}
+              />
+              <input
+                type="date"
+                className="px-3 py-2 border border-light-accent rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-warm-brown/20"
+                value={newChallenge.endDate}
+                onChange={(e) => setNewChallenge({ ...newChallenge, endDate: e.target.value })}
+              />
+            </div>
+            <input
+              className="px-3 py-2 border border-light-accent rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-warm-brown/20"
+              placeholder="Prize (optional)"
+              value={newChallenge.prize}
+              onChange={(e) => setNewChallenge({ ...newChallenge, prize: e.target.value })}
+            />
+            <div className="flex items-end">
+              <button
+                onClick={createChallenge}
+                className="px-4 py-3 bg-warm-brown text-white rounded-lg font-semibold hover:bg-warm-brown/90 transition-colors"
+              >
+                Post Challenge
+              </button>
+            </div>
+          </div>
+        </Card>
+      </motion.div>
+
+      {/* Manage Challenges */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.4 }}
+      >
+        <h3 className="text-xl font-semibold text-text-primary mb-4">Manage Challenges</h3>
+        <Card>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-light-accent">
+                  <th className="text-left py-3 px-4">Title</th>
+                  <th className="text-left py-3 px-4">Theme</th>
+                  <th className="text-left py-3 px-4">Status</th>
+                  <th className="text-left py-3 px-4">Dates</th>
+                  <th className="text-left py-3 px-4">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {challenges.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-6 px-4 text-center text-text-secondary">No challenges yet.</td>
+                  </tr>
+                ) : (
+                  challenges.flatMap((c: any) => {
+                    const subs = challengeSubmissions.filter((s: any) => s.challengeId === c.id);
+                    const isExpanded = selectedChallengeForSubmissions === c.id;
+                    
+                    const rows: JSX.Element[] = [
+                      <tr key={c.id} className="border-b border-light-accent/50">
+                        <td className="py-3 px-4 font-semibold text-text-primary">{c.title}</td>
+                        <td className="py-3 px-4 text-text-secondary">{c.theme}</td>
+                        <td className="py-3 px-4 text-text-secondary">{c.status || 'upcoming'}</td>
+                        <td className="py-3 px-4 text-text-secondary">
+                          {(c.startDate?.toDate?.() || new Date(c.startDate)).toLocaleDateString()} - {(c.endDate?.toDate?.() || new Date(c.endDate)).toLocaleDateString()}
+                        </td>
+                        <td className="py-3 px-4 flex gap-2">
+                          <button 
+                            onClick={() => setSelectedChallengeForSubmissions(isExpanded ? null : c.id)} 
+                            className="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-1"
+                          >
+                            <Eye className="w-4 h-4" />
+                            {subs.length} Submissions
+                          </button>
+                          <button onClick={() => endChallenge(c.id)} className="px-3 py-2 bg-gray-200 rounded-lg hover:bg-gray-300">End</button>
+                          <button onClick={() => deleteChallenge(c.id)} className="px-3 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">Delete</button>
+                        </td>
+                      </tr>
+                    ];
+                    
+                    if (isExpanded) {
+                      rows.push(
+                        <tr key={`${c.id}-submissions`}>
+                          <td colSpan={5} className="py-4 px-4">
+                            <div className="bg-light-accent/30 rounded-lg p-4">
+                              <h4 className="font-semibold text-text-primary mb-3 flex items-center gap-2">
+                                <Trophy className="w-5 h-5 text-warm-brown" />
+                                Submissions for "{c.title}"
+                              </h4>
+                              {subs.length === 0 ? (
+                                <p className="text-text-secondary text-center py-4">No submissions yet.</p>
+                              ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                  {subs.map((sub: any) => (
+                                    <Card key={sub.id} className="overflow-hidden">
+                                      <div className="relative">
+                                        <img
+                                          src={sub.imageUrl}
+                                          alt={sub.title}
+                                          className="w-full h-40 object-cover"
+                                        />
+                                      </div>
+                                      <div className="p-3">
+                                        <h5 className="font-bold text-text-primary mb-1 line-clamp-1">{sub.title}</h5>
+                                        <p className="text-xs text-text-secondary mb-2 line-clamp-2">{sub.description}</p>
+                                        <div className="flex items-center justify-between">
+                                          <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 bg-warm-brown rounded-full flex items-center justify-center">
+                                              <span className="text-white text-xs font-bold">
+                                                {sub.userName?.charAt(0).toUpperCase() || 'A'}
+                                              </span>
+                                            </div>
+                                            <span className="text-xs font-semibold text-text-primary">{sub.userName || 'Anonymous'}</span>
+                                          </div>
+                                          <div className="flex items-center gap-1 text-text-secondary">
+                                            <Star className="w-3 h-3" />
+                                            <span className="text-xs">{sub.votes || 0}</span>
+                                          </div>
+                                        </div>
+                                        <div className="mt-2 text-xs text-text-secondary">
+                                          Submitted: {sub.createdAt?.toDate?.()?.toLocaleDateString() || 'Unknown'}
+                                        </div>
+                                      </div>
+                                    </Card>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+                    
+                    return rows;
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </motion.div>
+
+      {/* Challenge Submissions Summary */}
+      {challengeSubmissions.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.45 }}
+        >
+          <h3 className="text-xl font-semibold text-text-primary mb-4">All Challenge Submissions</h3>
+          <Card>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {challengeSubmissions.slice(0, 12).map((sub: any) => {
+                const challenge = challenges.find((c: any) => c.id === sub.challengeId);
+                return (
+                  <Card key={sub.id} className="overflow-hidden p-0">
+                    <div className="relative">
+                      <img
+                        src={sub.imageUrl}
+                        alt={sub.title}
+                        className="w-full h-32 object-cover"
+                      />
+                      {challenge && (
+                        <div className="absolute top-1 right-1">
+                          <span className="px-1.5 py-0.5 bg-warm-brown/90 text-white text-xs font-semibold rounded">
+                            {challenge.theme}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-2">
+                      <h6 className="font-semibold text-text-primary text-sm line-clamp-1 mb-1">{sub.title}</h6>
+                      <p className="text-xs text-text-secondary line-clamp-1 mb-1">{sub.userName || 'Anonymous'}</p>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-text-secondary">{challenge?.title || 'Challenge'}</span>
+                        <span className="flex items-center gap-1 text-warm-brown">
+                          <Star className="w-3 h-3" />
+                          {sub.votes || 0}
+                        </span>
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+            {challengeSubmissions.length > 12 && (
+              <div className="text-center mt-4">
+                <p className="text-text-secondary">And {challengeSubmissions.length - 12} more submissions...</p>
+              </div>
+            )}
+          </Card>
+        </motion.div>
+      )}
 
       {/* Filters and Search */}
       <motion.div

@@ -40,7 +40,6 @@ export default function AdminDashboard() {
   const statCards = [
     { icon: BookOpen, label: 'Total Courses', value: stats.courses, color: 'text-admin-accent', bg: 'bg-admin-accent/10' },
     { icon: Newspaper, label: 'News Articles', value: stats.news, color: 'text-primary-accent', bg: 'bg-primary-accent/10' },
-    { icon: FolderKanban, label: 'Projects', value: stats.projects, color: 'text-success', bg: 'bg-success/10' },
     { icon: Briefcase, label: 'Job Postings', value: stats.jobs, color: 'text-warning', bg: 'bg-warning/10' },
   ];
 
@@ -80,7 +79,7 @@ export default function AdminDashboard() {
       </motion.div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {statCards.map((stat, index) => {
           const Icon = stat.icon;
           return (

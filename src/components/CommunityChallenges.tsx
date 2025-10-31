@@ -10,11 +10,15 @@ import {
   Target,
   Zap,
   Crown,
-  TrendingUp
+  TrendingUp,
+  X,
+  Upload,
+  Image as ImageIcon
 } from 'lucide-react';
 import Card from './Card';
-import { db } from '../lib/firebase';
-import { collection, getDocs, addDoc, doc, updateDoc, query, orderBy, where, getDoc } from 'firebase/firestore';
+import { db, storage, auth } from '../lib/firebase';
+import { collection, getDocs, addDoc, doc, updateDoc, query, orderBy, where, getDoc, Timestamp, increment, arrayUnion } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 interface Challenge {
   id: string;
@@ -58,10 +62,25 @@ export default function CommunityChallenges() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'challenges' | 'leaderboard'>('challenges');
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [communityStats, setCommunityStats] = useState({
+    totalPosts: 0,
+    pendingPosts: 0,
+    activeArtists: 0,
+    weeklyLeader: ''
+  });
+  const [showSubmissionModal, setShowSubmissionModal] = useState(false);
+  const [selectedChallenge, setSelectedChallenge] = useState<Challenge | null>(null);
+  const [submissionData, setSubmissionData] = useState({
+    title: '',
+    description: '',
+    imageFile: null as File | null
+  });
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     fetchChallenges();
     fetchSubmissions();
+    fetchCommunityStats();
   }, []);
 
   useEffect(() => {
@@ -81,6 +100,46 @@ export default function CommunityChallenges() {
       setChallenges(challengesData);
     } catch (error) {
       console.error('Error fetching challenges:', error);
+    }
+  };
+
+  const fetchCommunityStats = async () => {
+    try {
+      const [postsSnapshot, usersSnapshot, profilesSnapshot] = await Promise.all([
+        getDocs(collection(db, 'artPosts')),
+        getDocs(collection(db, 'userPoints')),
+        getDocs(collection(db, 'user_profiles'))
+      ]);
+
+      const postsData = postsSnapshot.docs.map(d => d.data());
+      const usersData = usersSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      const pendingPosts = postsData.filter((p: any) => p.status === 'pending' || !p.status).length;
+      const usersWithPoints = usersData.filter((u: any) => (u.totalPoints > 0 || u.weeklyPoints > 0));
+      const sortedByWeekly = [...usersWithPoints].sort((a: any, b: any) => (b.weeklyPoints || 0) - (a.weeklyPoints || 0));
+      const top = sortedByWeekly[0];
+
+      // Build email->name map
+      const profileEmailMap: { [email: string]: string } = {};
+      profilesSnapshot.docs.forEach(doc => {
+        const data: any = doc.data();
+        if (data.email && data.name) profileEmailMap[data.email.toLowerCase()] = data.name;
+      });
+
+      let weeklyLeaderName = '';
+      if (top) {
+        const email = (top.email || '').toLowerCase();
+        weeklyLeaderName = profileEmailMap[email] || top.creatorName || (email ? email.split('@')[0] : '');
+      }
+
+      setCommunityStats({
+        totalPosts: postsSnapshot.size,
+        pendingPosts,
+        activeArtists: usersWithPoints.length,
+        weeklyLeader: weeklyLeaderName
+      });
+    } catch (e) {
+      console.error('Error fetching community stats', e);
     }
   };
 
@@ -226,6 +285,163 @@ export default function CommunityChallenges() {
     }
   };
 
+  const handleSetReminder = (challenge: Challenge) => {
+    try {
+      const existingRaw = localStorage.getItem('challengeReminders') || '[]';
+      const existing = JSON.parse(existingRaw);
+      const already = existing.some((r: any) => r.id === challenge.id);
+      if (!already) {
+        existing.push({
+          id: challenge.id,
+          title: challenge.title,
+          start: challenge.startDate,
+          end: challenge.endDate
+        });
+        localStorage.setItem('challengeReminders', JSON.stringify(existing));
+      }
+      alert('Reminder set! We\'ll remind you on the challenge start date.');
+    } catch (e) {
+      console.error('Failed to set reminder', e);
+      alert('Could not set reminder. Please try again.');
+    }
+  };
+
+  const compressImage = (file: File, maxWidth: number = 1200, quality: number = 0.7): Promise<File> => {
+    return new Promise((resolve) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        ctx?.drawImage(img, 0, 0, width, height);
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() }));
+            } else {
+              resolve(file);
+            }
+          },
+          'image/jpeg',
+          quality
+        );
+      };
+      img.onerror = () => resolve(file);
+      img.src = URL.createObjectURL(file);
+    });
+  };
+
+  const convertToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleOpenSubmissionModal = (challenge: Challenge) => {
+    const user = auth.currentUser;
+    if (!user) {
+      alert('Please sign in to submit artwork for challenges.');
+      return;
+    }
+    setSelectedChallenge(challenge);
+    setSubmissionData({ title: '', description: '', imageFile: null });
+    setShowSubmissionModal(true);
+  };
+
+  const handleSubmitArtwork = async () => {
+    if (!selectedChallenge || !auth.currentUser) return;
+    
+    const { title, description, imageFile } = submissionData;
+    if (!title || !description || !imageFile) {
+      alert('Please fill in all fields and upload an image.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const user = auth.currentUser;
+      const userId = user.uid;
+      const userName = user.displayName || user.email?.split('@')[0] || 'Anonymous';
+      
+      // Compress image (fast, client-side)
+      const compressedFile = await compressImage(imageFile);
+      
+      // Use base64 for localhost/dev (much faster), Firebase Storage for production
+      let imageUrl: string;
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      
+      if (isLocalhost) {
+        // Instant base64 for localhost
+        imageUrl = await convertToBase64(compressedFile);
+      } else {
+        // Firebase Storage for production
+        const imageRef = ref(storage, `challenge-submissions/${selectedChallenge.id}/${userId}_${Date.now()}_${compressedFile.name}`);
+        await uploadBytes(imageRef, compressedFile);
+        imageUrl = await getDownloadURL(imageRef);
+      }
+
+      // Create submission and update challenge atomically (no read needed)
+      const challengeRef = doc(db, 'challenges', selectedChallenge.id);
+      
+      // Create submission first
+      await addDoc(collection(db, 'challengeSubmissions'), {
+        challengeId: selectedChallenge.id,
+        userId: userId,
+        userName: userName,
+        title: title,
+        description: description,
+        imageUrl: imageUrl,
+        votes: 0,
+        createdAt: Timestamp.now()
+      });
+
+      // Update challenge counts atomically (fast, no read needed!)
+      await updateDoc(challengeRef, {
+        submissions: increment(1),
+        participantIds: arrayUnion(userId)
+      });
+
+      // Update participants count in background (non-blocking)
+      getDoc(challengeRef).then(doc => {
+        if (doc.exists()) {
+          const data = doc.data();
+          const participantIds = data.participantIds || [];
+          updateDoc(challengeRef, { participants: participantIds.length }).catch(console.error);
+        }
+      }).catch(console.error);
+
+      // Close modal immediately (better UX)
+      setShowSubmissionModal(false);
+      setSelectedChallenge(null);
+      setSubmissionData({ title: '', description: '', imageFile: null });
+      
+      alert('Your artwork has been submitted successfully! 🎨');
+      
+      // Immediately refresh submissions and challenges
+      await Promise.all([
+        fetchSubmissions(),
+        fetchChallenges()
+      ]);
+      
+      setSubmitting(false);
+      
+    } catch (error) {
+      console.error('Error submitting artwork:', error);
+      alert('Failed to submit artwork. Please try again.');
+      setSubmitting(false);
+    }
+  };
+
   const getChallengeStatus = (challenge: Challenge) => {
     const now = new Date();
     const startDate = challenge.startDate?.toDate?.() || new Date(challenge.startDate);
@@ -262,6 +478,36 @@ export default function CommunityChallenges() {
 
   return (
     <div className="space-y-8">
+      {/* Community Stats Overview */}
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+      >
+        <Card>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {[{
+              label: 'Total Posts', value: communityStats.totalPosts, icon: TrendingUp as any, bg: 'bg-admin-accent/10', color: 'text-admin-accent'
+            },{
+              label: 'Pending Review', value: communityStats.pendingPosts, icon: Calendar as any, bg: 'bg-warning/10', color: 'text-warning'
+            },{
+              label: 'Active Artists', value: communityStats.activeArtists, icon: Users as any, bg: 'bg-success/10', color: 'text-success'
+            },{
+              label: 'Weekly Leader', value: communityStats.weeklyLeader || '—', icon: Crown as any, bg: 'bg-warm-brown/10', color: 'text-warm-brown'
+            }].map((s, idx) => (
+              <div key={idx} className="flex items-center justify-between p-4 rounded-xl bg-white/60">
+                <div>
+                  <p className={`text-2xl font-bold ${s.label === 'Weekly Leader' ? 'text-text-primary' : 'text-text-primary'}`}>{s.value as any}</p>
+                  <p className="text-sm text-text-secondary">{s.label}</p>
+                </div>
+                <div className={`w-14 h-14 ${s.bg} rounded-xl flex items-center justify-center`}>
+                  <s.icon className={`w-7 h-7 ${s.color}`} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </motion.div>
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
@@ -396,14 +642,120 @@ export default function CommunityChallenges() {
                         <motion.button
                           whileHover={{ scale: 1.05 }}
                           whileTap={{ scale: 0.95 }}
-                          className="w-full px-4 py-3 bg-warm-brown text-white rounded-lg font-semibold hover:bg-warm-brown/90 transition-colors"
+                          type="button"
+                          onClick={() => handleOpenSubmissionModal(challenge)}
+                          className="w-full px-4 py-3 bg-warm-brown text-white rounded-lg font-semibold hover:bg-warm-brown/90 transition-colors cursor-pointer mb-3"
                         >
                           Submit Your Artwork
                         </motion.button>
+                        
+                        {/* Show Submissions for this Challenge */}
+                        {(() => {
+                          const challengeSubmissions = submissions.filter(s => s.challengeId === challenge.id);
+                          if (challengeSubmissions.length > 0) {
+                            return (
+                              <div className="mt-4 pt-4 border-t border-green-200">
+                                <h6 className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
+                                  <Users className="w-4 h-4" />
+                                  Submissions ({challengeSubmissions.length})
+                                </h6>
+                                <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+                                  {challengeSubmissions.slice(0, 4).map((sub) => (
+                                    <div key={sub.id} className="relative group">
+                                      <img
+                                        src={sub.imageUrl}
+                                        alt={sub.title}
+                                        className="w-full h-24 object-cover rounded-lg"
+                                      />
+                                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center p-2">
+                                        <p className="text-white text-xs text-center font-semibold line-clamp-2">{sub.title}</p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                  {challengeSubmissions.length > 4 && (
+                                    <div className="w-full h-24 bg-green-100 rounded-lg flex items-center justify-center">
+                                      <span className="text-xs font-semibold text-green-600">
+                                        +{challengeSubmissions.length - 4} more
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
                       </div>
                     </Card>
                   </motion.div>
                 ))}
+              </div>
+            </motion.div>
+          )}
+
+          {/* Submissions Gallery - Full View */}
+          {activeChallenges.length > 0 && submissions.filter(s => activeChallenges.some(c => c.id === s.challengeId)).length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.35 }}
+            >
+              <h3 className="text-xl font-semibold text-text-primary mb-4 flex items-center gap-2">
+                <Trophy className="w-6 h-6 text-warm-brown" />
+                Recent Submissions
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {submissions
+                  .filter(s => activeChallenges.some(c => c.id === s.challengeId))
+                  .sort((a, b) => {
+                    const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
+                    const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
+                    return bTime - aTime;
+                  })
+                  .slice(0, 9)
+                  .map((submission) => {
+                    const challenge = activeChallenges.find(c => c.id === submission.challengeId);
+                    return (
+                      <motion.div
+                        key={submission.id}
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                      >
+                        <Card className="overflow-hidden">
+                          <div className="relative">
+                            <img
+                              src={submission.imageUrl}
+                              alt={submission.title}
+                              className="w-full h-48 object-cover"
+                            />
+                            <div className="absolute top-2 right-2">
+                              <span className="px-2 py-1 bg-warm-brown/90 text-white text-xs font-semibold rounded">
+                                {challenge?.theme || 'Challenge'}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="p-4">
+                            <h5 className="font-bold text-text-primary mb-1 line-clamp-1">{submission.title}</h5>
+                            <p className="text-sm text-text-secondary mb-2 line-clamp-2">{submission.description}</p>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 bg-warm-brown rounded-full flex items-center justify-center">
+                                  <span className="text-white text-xs font-bold">
+                                    {submission.userName.charAt(0).toUpperCase()}
+                                  </span>
+                                </div>
+                                <span className="text-xs font-semibold text-text-primary">{submission.userName}</span>
+                              </div>
+                              <div className="flex items-center gap-1 text-text-secondary">
+                                <Star className="w-4 h-4" />
+                                <span className="text-xs">{submission.votes || 0}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </Card>
+                      </motion.div>
+                    );
+                  })}
               </div>
             </motion.div>
           )}
@@ -460,7 +812,9 @@ export default function CommunityChallenges() {
                         <motion.button
                           whileHover={{ scale: 1.05 }}
                           whileTap={{ scale: 0.95 }}
-                          className="w-full px-4 py-3 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors"
+                          type="button"
+                          onClick={() => handleSetReminder(challenge)}
+                          className="w-full px-4 py-3 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors cursor-pointer"
                         >
                           Set Reminder
                         </motion.button>
@@ -528,13 +882,46 @@ export default function CommunityChallenges() {
                           </div>
                         )}
                         
-                        <motion.button
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
-                          className="w-full px-4 py-3 bg-gray-500 text-white rounded-lg font-semibold hover:bg-gray-600 transition-colors"
-                        >
-                          View Results
-                        </motion.button>
+                        {/* Show Submissions for this Past Challenge */}
+                        {(() => {
+                          const challengeSubmissions = submissions.filter(s => s.challengeId === challenge.id);
+                          if (challengeSubmissions.length > 0) {
+                            return (
+                              <div className="mt-4 pt-4 border-t border-gray-200">
+                                <h6 className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
+                                  <Users className="w-4 h-4" />
+                                  Submissions ({challengeSubmissions.length})
+                                </h6>
+                                <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+                                  {challengeSubmissions.slice(0, 4).map((sub) => (
+                                    <div key={sub.id} className="relative group">
+                                      <img
+                                        src={sub.imageUrl}
+                                        alt={sub.title}
+                                        className="w-full h-24 object-cover rounded-lg"
+                                      />
+                                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center p-2">
+                                        <p className="text-white text-xs text-center font-semibold line-clamp-2">{sub.title}</p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                  {challengeSubmissions.length > 4 && (
+                                    <div className="w-full h-24 bg-gray-100 rounded-lg flex items-center justify-center">
+                                      <span className="text-xs font-semibold text-gray-600">
+                                        +{challengeSubmissions.length - 4} more
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          }
+                          return (
+                            <div className="mt-4 pt-4 border-t border-gray-200 text-center">
+                              <p className="text-sm text-text-secondary">No submissions yet</p>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </Card>
                   </motion.div>
@@ -631,6 +1018,144 @@ export default function CommunityChallenges() {
             </div>
           </Card>
         </motion.div>
+      )}
+
+      {/* Submission Modal */}
+      {showSubmissionModal && selectedChallenge && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+          >
+            <Card className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-2xl font-bold text-text-primary">Submit Your Artwork</h3>
+                  <p className="text-sm text-text-secondary">Challenge: {selectedChallenge.title}</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowSubmissionModal(false);
+                    setSelectedChallenge(null);
+                    setSubmissionData({ title: '', description: '', imageFile: null });
+                  }}
+                  className="p-2 hover:bg-light-accent rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5 text-medium-gray" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-text-primary mb-2">
+                    Artwork Title *
+                  </label>
+                  <input
+                    type="text"
+                    value={submissionData.title}
+                    onChange={(e) => setSubmissionData({ ...submissionData, title: e.target.value })}
+                    placeholder="Give your artwork a title"
+                    className="w-full px-4 py-2 border border-light-accent rounded-lg focus:outline-none focus:ring-2 focus:ring-warm-brown/20"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-text-primary mb-2">
+                    Description *
+                  </label>
+                  <textarea
+                    value={submissionData.description}
+                    onChange={(e) => setSubmissionData({ ...submissionData, description: e.target.value })}
+                    placeholder="Describe your artwork and how it relates to the challenge theme"
+                    rows={4}
+                    className="w-full px-4 py-2 border border-light-accent rounded-lg focus:outline-none focus:ring-2 focus:ring-warm-brown/20 resize-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-text-primary mb-2">
+                    Upload Image *
+                  </label>
+                  <div className="border-2 border-dashed border-light-accent rounded-lg p-6 text-center">
+                    {submissionData.imageFile ? (
+                      <div className="space-y-2">
+                        <img
+                          src={URL.createObjectURL(submissionData.imageFile)}
+                          alt="Preview"
+                          className="max-h-48 mx-auto rounded-lg"
+                        />
+                        <p className="text-sm text-text-secondary">{submissionData.imageFile.name}</p>
+                        <button
+                          onClick={() => setSubmissionData({ ...submissionData, imageFile: null })}
+                          className="text-sm text-red-500 hover:text-red-600"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="cursor-pointer">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              setSubmissionData({ ...submissionData, imageFile: file });
+                            }
+                          }}
+                          className="hidden"
+                        />
+                        <div className="space-y-2">
+                          <ImageIcon className="w-12 h-12 text-medium-gray mx-auto" />
+                          <p className="text-sm text-text-secondary">
+                            Click to upload or drag and drop
+                          </p>
+                          <p className="text-xs text-medium-gray">PNG, JPG up to 10MB</p>
+                        </div>
+                      </label>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => {
+                      setShowSubmissionModal(false);
+                      setSelectedChallenge(null);
+                      setSubmissionData({ title: '', description: '', imageFile: null });
+                    }}
+                    disabled={submitting}
+                    className="flex-1 px-4 py-3 bg-gray-200 text-text-primary rounded-lg hover:bg-gray-300 transition-colors font-semibold disabled:opacity-50"
+                  >
+                    Cancel
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleSubmitArtwork}
+                    disabled={submitting || !submissionData.title || !submissionData.description || !submissionData.imageFile}
+                    className="flex-1 px-4 py-3 bg-warm-brown text-white rounded-lg hover:bg-warm-brown/90 transition-colors font-semibold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {submitting ? (
+                      <>
+                        <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full"></div>
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-5 h-5" />
+                        Submit Artwork
+                      </>
+                    )}
+                  </motion.button>
+                </div>
+              </div>
+            </Card>
+          </motion.div>
+        </div>
       )}
     </div>
   );
