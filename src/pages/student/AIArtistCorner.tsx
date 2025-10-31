@@ -1,33 +1,30 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Heart, 
-  MessageCircle, 
-  Share2, 
-  Plus, 
-  Filter, 
-  Trophy, 
-  Star, 
+import {
+  Heart,
+  MessageCircle,
+  Share2,
+  Plus,
+  Filter,
+  Trophy,
+  Star,
   Award,
   Upload,
-  Image as ImageIcon,
-  Video,
   Sparkles,
   TrendingUp,
-  Users,
   Calendar,
   Tag,
   Target,
   Send,
-  Copy,
-  Check,
-  X
+  Check
 } from 'lucide-react';
 import Card from '../../components/Card';
 import CommunityChallenges from '../../components/CommunityChallenges';
-import { db, auth, storage } from '../../lib/firebase';
+import { db, storage } from '../../lib/firebase';
 import { collection, getDocs, addDoc, doc, updateDoc, arrayUnion, arrayRemove, query, orderBy, limit, getDoc, setDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { useUser } from '../../contexts/UserContext';
+import type { User } from 'firebase/auth';
 
 interface ArtPost {
   id: string;
@@ -83,6 +80,7 @@ export default function AIArtistCorner() {
   const [showWallet, setShowWallet] = useState(false);
   const [featuredCreator, setFeaturedCreator] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'feed' | 'challenges'>('feed');
+  const { user, loading: authLoading } = useUser();
   
   // New state for comments and sharing
   const [showComments, setShowComments] = useState<string | null>(null);
@@ -92,9 +90,17 @@ export default function AIArtistCorner() {
 
   useEffect(() => {
     fetchPosts();
-    fetchUserPoints();
     fetchFeaturedCreator();
   }, []);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      setUserPoints(null);
+      return;
+    }
+    fetchUserPoints(user);
+  }, [user, authLoading]);
 
   const fetchPosts = async () => {
     try {
@@ -113,11 +119,9 @@ export default function AIArtistCorner() {
     }
   };
 
-  const fetchUserPoints = async () => {
-    if (!auth.currentUser) return;
-    
+  const fetchUserPoints = async (currentUser: User) => {
     try {
-      const userRef = doc(db, 'userPoints', auth.currentUser.uid);
+      const userRef = doc(db, 'userPoints', currentUser.uid);
       const userDoc = await getDoc(userRef);
       
       if (userDoc.exists()) {
@@ -125,16 +129,16 @@ export default function AIArtistCorner() {
         setUserPoints(userData as UserPoints);
         
         // Update email if missing
-        if (!userData.email && auth.currentUser.email) {
+        if (!userData.email && currentUser.email) {
           await updateDoc(userRef, {
-            email: auth.currentUser.email
+            email: currentUser.email
           });
         }
       } else {
         // Initialize user points with email
         const newUserPoints = {
-          userId: auth.currentUser.uid,
-          email: auth.currentUser.email || '',
+          userId: currentUser.uid,
+          email: currentUser.email || '',
           totalPoints: 0,
           weeklyPoints: 0,
           posts: 0,
@@ -161,7 +165,10 @@ export default function AIArtistCorner() {
   };
 
   const handleUpvote = async (postId: string) => {
-    if (!auth.currentUser) return;
+    if (!user) {
+      alert('Please sign in to upvote posts.');
+      return;
+    }
 
     try {
       const postRef = doc(db, 'artPosts', postId);
@@ -169,18 +176,18 @@ export default function AIArtistCorner() {
       
       if (!post) return;
 
-      const isUpvoted = post.upvotedBy.includes(auth.currentUser.uid);
+      const isUpvoted = post.upvotedBy.includes(user.uid);
       
       if (isUpvoted) {
         // Remove upvote
         await updateDoc(postRef, {
           upvotes: post.upvotes - 1,
-          upvotedBy: arrayRemove(auth.currentUser.uid)
+          upvotedBy: arrayRemove(user.uid)
         });
         
         // Update user points
         if (userPoints) {
-          const userRef = doc(db, 'userPoints', auth.currentUser.uid);
+          const userRef = doc(db, 'userPoints', user.uid);
           await updateDoc(userRef, {
             upvotes: userPoints.upvotes - 1,
             totalPoints: userPoints.totalPoints - 1
@@ -190,12 +197,12 @@ export default function AIArtistCorner() {
         // Add upvote
         await updateDoc(postRef, {
           upvotes: post.upvotes + 1,
-          upvotedBy: arrayUnion(auth.currentUser.uid)
+          upvotedBy: arrayUnion(user.uid)
         });
         
         // Update user points
         if (userPoints) {
-          const userRef = doc(db, 'userPoints', auth.currentUser.uid);
+          const userRef = doc(db, 'userPoints', user.uid);
           await updateDoc(userRef, {
             upvotes: userPoints.upvotes + 1,
             totalPoints: userPoints.totalPoints + 1
@@ -204,7 +211,7 @@ export default function AIArtistCorner() {
       }
       
       fetchPosts();
-      fetchUserPoints();
+      if (user) fetchUserPoints(user);
     } catch (error) {
       console.error('Error upvoting:', error);
     }
@@ -212,14 +219,18 @@ export default function AIArtistCorner() {
 
   // Handle adding comments
   const handleAddComment = async (postId: string) => {
-    if (!commentText.trim() || !auth.currentUser) return;
+    if (!commentText.trim()) return;
+    if (!user) {
+      alert('Please sign in to comment.');
+      return;
+    }
     
     try {
       const commentData = {
         text: commentText.trim(),
-        authorName: auth.currentUser.displayName || 'Anonymous',
-        authorAvatar: auth.currentUser.photoURL || '',
-        authorId: auth.currentUser.uid,
+        authorName: user.displayName || user.email?.split('@')[0] || 'Anonymous',
+        authorAvatar: user.photoURL || '',
+        authorId: user.uid,
         createdAt: new Date()
       };
       
@@ -346,7 +357,13 @@ export default function AIArtistCorner() {
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => setShowCreateModal(true)}
+                  onClick={() => {
+                    if (!user) {
+                      alert('Please sign in to create a post.');
+                      return;
+                    }
+                    setShowCreateModal(true);
+                  }}
                   className="px-6 py-3 bg-warm-brown text-white rounded-xl font-semibold flex items-center gap-2 shadow-lg hover:shadow-xl transition-all"
                 >
                   <Plus className="w-5 h-5" />
@@ -548,13 +565,13 @@ export default function AIArtistCorner() {
                                 whileTap={{ scale: 0.9 }}
                                 onClick={() => handleUpvote(post.id)}
                                 className={`flex items-center gap-1 px-3 py-1 rounded-full transition-all ${
-                                  post.upvotedBy.includes(auth.currentUser?.uid || '')
+                                  post.upvotedBy.includes(user?.uid || '')
                                     ? 'bg-red-100 text-red-600'
                                     : 'bg-light-accent text-medium-gray hover:bg-red-50'
                                 }`}
                               >
                                 <Heart className={`w-4 h-4 ${
-                                  post.upvotedBy.includes(auth.currentUser?.uid || '') ? 'fill-current' : ''
+                                  post.upvotedBy.includes(user?.uid || '') ? 'fill-current' : ''
                                 }`} />
                                 {post.upvotes}
                               </motion.button>
@@ -653,11 +670,11 @@ export default function AIArtistCorner() {
                                 </div>
                                 
                                 {/* Add Comment Form */}
-                                {auth.currentUser && (
+                                {user && (
                                   <div className="flex gap-3 pt-3 border-t border-light-accent">
                                     <div className="w-8 h-8 bg-warm-brown rounded-full flex items-center justify-center flex-shrink-0">
                                       <span className="text-white text-xs font-bold">
-                                        {auth.currentUser.displayName?.charAt(0).toUpperCase() || 'A'}
+                                        {user.displayName?.charAt(0).toUpperCase() || user.email?.charAt(0).toUpperCase() || 'A'}
                                       </span>
                                     </div>
                                     <div className="flex-1 flex gap-2">
@@ -733,9 +750,10 @@ export default function AIArtistCorner() {
             onClose={() => setShowCreateModal(false)}
             onPostCreated={() => {
               fetchPosts();
-              fetchUserPoints();
+              if (user) fetchUserPoints(user);
               setShowCreateModal(false);
             }}
+            userPoints={userPoints}
           />
         )}
       </AnimatePresence>
@@ -754,7 +772,7 @@ export default function AIArtistCorner() {
 }
 
 // Create Post Modal Component
-function CreatePostModal({ onClose, onPostCreated }: { onClose: () => void; onPostCreated: () => void }) {
+function CreatePostModal({ onClose, onPostCreated, userPoints }: { onClose: () => void; onPostCreated: () => void; userPoints: UserPoints | null }) {
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -765,6 +783,7 @@ function CreatePostModal({ onClose, onPostCreated }: { onClose: () => void; onPo
   });
   const [uploading, setUploading] = useState(false);
   const [tagInput, setTagInput] = useState('');
+  const { user } = useUser();
 
   const compressImage = (file: File, maxWidth: number = 1200, quality: number = 0.8): Promise<File> => {
     return new Promise((resolve) => {
@@ -838,7 +857,14 @@ function CreatePostModal({ onClose, onPostCreated }: { onClose: () => void; onPo
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth.currentUser || !formData.image) return;
+    if (!user) {
+      alert('Please sign in to create a post.');
+      return;
+    }
+    if (!formData.image) {
+      alert('Please upload an image before posting.');
+      return;
+    }
 
     setUploading(true);
     try {
@@ -855,9 +881,9 @@ function CreatePostModal({ onClose, onPostCreated }: { onClose: () => void; onPo
         title: formData.title,
         description: formData.description,
         imageUrl,
-        creatorName: auth.currentUser.displayName || 'Anonymous',
-        creatorAvatar: auth.currentUser.photoURL || '',
-        creatorId: auth.currentUser.uid,
+        creatorName: user.displayName || user.email?.split('@')[0] || 'Anonymous',
+        creatorAvatar: user.photoURL || '',
+        creatorId: user.uid,
         aiTool: formData.aiTool,
         category: formData.category,
         tags: formData.tags,
@@ -873,11 +899,20 @@ function CreatePostModal({ onClose, onPostCreated }: { onClose: () => void; onPo
       
       // Step 4: Update user points (optional, can be done in background)
       try {
-        const userRef = doc(db, 'userPoints', auth.currentUser.uid);
+        const userRef = doc(db, 'userPoints', user.uid);
         await updateDoc(userRef, {
           posts: (userPoints?.posts || 0) + 1,
           totalPoints: (userPoints?.totalPoints || 0) + 5,
           weeklyPoints: (userPoints?.weeklyPoints || 0) + 5
+        }).catch(async () => {
+          await setDoc(userRef, {
+            userId: user.uid,
+            email: user.email || '',
+            posts: (userPoints?.posts || 0) + 1,
+            totalPoints: (userPoints?.totalPoints || 0) + 5,
+            weeklyPoints: (userPoints?.weeklyPoints || 0) + 5,
+            upvotes: userPoints?.upvotes || 0
+          }, { merge: true });
         });
       } catch (pointsError) {
         console.warn('Failed to update user points:', pointsError);

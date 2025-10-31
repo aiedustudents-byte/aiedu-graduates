@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import Card from '../../components/Card';
-import { auth, db } from '../../lib/firebase';
+import { db } from '../../lib/firebase';
 import { addDoc, collection, doc, getDocs, increment, limit, orderBy, query, Timestamp, updateDoc, where } from 'firebase/firestore';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { useUser } from '../../contexts/UserContext';
 
 type MoodType = 'joy' | 'calm' | 'neutral' | 'sad' | 'angry';
 
@@ -66,8 +67,7 @@ export default function WellnessCorner() {
   const [memSequence, setMemSequence] = useState<MoodType[]>([]);
   const [memInputIndex, setMemInputIndex] = useState(0);
   const [showSequence, setShowSequence] = useState(false);
-
-  const user = auth.currentUser;
+  const { user, loading } = useUser();
 
   const vibeScore = useMemo(() => {
     if (moodHistory.length === 0) return 0;
@@ -86,7 +86,12 @@ export default function WellnessCorner() {
 
   // load logs
   useEffect(() => {
-    if (!user) return;
+    if (loading) return;
+    if (!user) {
+      setTodayMood(null);
+      setMoodHistory([]);
+      return;
+    }
     (async () => {
       const logsRef = collection(db, 'user_mood_logs');
       const q = query(logsRef, where('userId', '==', user.uid), orderBy('createdAt', 'desc'), limit(60));
@@ -101,7 +106,7 @@ export default function WellnessCorner() {
       });
       setMoodHistory(logs.reverse());
     })();
-  }, [user]);
+  }, [user, loading]);
 
   // load videos
   useEffect(() => {
@@ -128,7 +133,11 @@ export default function WellnessCorner() {
   }
 
   async function handleMoodSelect(mood: MoodType) {
-    if (!user || checkingIn) return;
+    if (!user) {
+      alert('Please sign in to log your mood.');
+      return;
+    }
+    if (checkingIn) return;
     setCheckingIn(true);
     try {
       const now = new Date();
@@ -136,7 +145,12 @@ export default function WellnessCorner() {
       setTodayMood(mood);
       setMoodHistory((prev) => [...prev, { userId: user.uid, mood, createdAt: now }]);
       await awardPoints(MOOD_POINTS.checkIn);
-    } finally { setCheckingIn(false); }
+    } catch (error) {
+      console.error('Error saving mood check-in:', error);
+      alert('Could not record your mood. Please try again.');
+    } finally {
+      setCheckingIn(false);
+    }
   }
 
   async function handleSummarize() {
@@ -184,7 +198,21 @@ export default function WellnessCorner() {
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
         <Card>
           <div className="flex items-center justify-between mb-4"><h2 className="text-2xl font-semibold text-dark-primary">Daily Mood Check‑In</h2>{todayMood ? (<span className="text-sm text-medium-gray">Checked in today: {moodEmojis.find(m=>m.key===todayMood)?.emoji}</span>) : (<span className="text-sm text-medium-gray">No check‑in yet</span>)}</div>
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">{moodEmojis.map(m => (<button key={m.key} disabled={!!todayMood||checkingIn} onClick={()=>handleMoodSelect(m.key)} className={`p-4 rounded-xl border border-light-accent bg-cream-bg hover:bg-light-accent/30 transition-all flex flex-col items-center gap-2 ${todayMood===m.key?'ring-2 ring-warm-brown':''}`}><span className="text-3xl">{m.emoji}</span><span className="text-sm text-text-secondary">{m.label}</span></button>))}</div>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">{moodEmojis.map(m => (
+            <button
+              key={m.key}
+              type="button"
+              disabled={!!todayMood || checkingIn || !user || loading}
+              onClick={() => handleMoodSelect(m.key)}
+              className={`p-4 rounded-xl border border-light-accent bg-cream-bg transition-all flex flex-col items-center gap-2 ${todayMood === m.key ? 'ring-2 ring-warm-brown' : ''} ${(!user || loading) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-light-accent/30'}`}
+            >
+              <span className="text-3xl">{m.emoji}</span>
+              <span className="text-sm text-text-secondary">{m.label}</span>
+            </button>
+          ))}</div>
+          {!loading && !user && (
+            <p className="text-xs text-text-secondary mt-2">Sign in to track your mood and earn wellness points.</p>
+          )}
         </Card>
       </motion.div>
 
