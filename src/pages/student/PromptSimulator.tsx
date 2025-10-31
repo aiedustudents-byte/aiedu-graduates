@@ -33,6 +33,117 @@ export default function PromptSimulator() {
     { id: 'claude-3', name: 'Claude 3', color: 'text-purple-500' },
   ];
 
+  const clampScore = (val: number) => Math.max(0, Math.min(100, Math.round(val)));
+
+  const analyzePrompt = (rawPrompt: string) => {
+    const text = rawPrompt.trim();
+    const lower = text.toLowerCase();
+    const wordCount = text ? text.split(/\s+/).length : 0;
+    const uniqueKeywords = new Set((lower.match(/\b[a-z]{5,}\b/g) || []).filter(w => !['please','write','create','generate','make','help','give','need','want','provide','the','that','with','this','about','for','from','into','using','like','such','very','your','their','with'].includes(w))).size;
+    const numbers = text.match(/\d+/g) || [];
+    const adjectives = text.match(/\b(creative|innovative|engaging|vivid|specific|detailed|immersive|inspiring|playful|data-driven|tactical|strategic|emotional|human|empathetic|visual|compelling|memorable|actionable|comprehensive|step-by-step|practical|imaginative|bold|fresh|original)\b/gi) || [];
+
+    const hasPurpose = /(\bhelp|\bcreate|\bwrite|\bdesign|\bbuild|\bdevelop|\bproduce|\bgenerate|\bcompose|\bdraft|\bexplain|\bsummarize|\bplan|\boutline|\bbrainstorm|objective|goal|purpose|achieve|in order to|so that)/i.test(lower);
+    const hasAudience = /(audience|customers?|clients?|students?|users?|children|kids|executives?|managers?|leaders?|developers?|designers?|teachers?|patients?|parents?|stakeholders?)/i.test(lower);
+    const hasTone = /(tone|style|formal|casual|friendly|professional|playful|academic|persuasive|empathetic|confident|neutral|conversational|inspirational|humorous)/i.test(lower);
+    const hasFormat = /(list|bullet|outline|steps|table|plan|script|story|email|summary|report|proposal|strategy|presentation|worksheet|lesson|curriculum|tweet|thread|poem|code|pseudocode|scenario|framework|canvas)/i.test(lower) || Boolean(selectedTaskObj?.output_format);
+    const hasConstraints = /(\b\d+\s*(words|sentences|paragraphs|pages|minutes|slides|ideas|options|examples|points|steps)|within\s+\d+|deadline|timeframe|limit)/i.test(lower);
+    const hasExamples = /(include|provide|give|such as|for example|e\.g\.|case study|sample)/i.test(lower);
+    const hasContext = hasAudience || /(background|context|currently|right now|regarding|related to|based on|about)/i.test(lower) || Boolean(task);
+
+    let clarityScore = 30;
+    clarityScore += hasPurpose ? 25 : -15;
+    clarityScore += hasAudience ? 10 : -5;
+    clarityScore += hasContext ? 8 : -6;
+    clarityScore += hasFormat ? 6 : 0;
+    clarityScore += hasTone ? 4 : 0;
+    if (wordCount >= 25 && wordCount <= 140) clarityScore += 10;
+    if (wordCount < 15) clarityScore -= 15;
+    if (wordCount > 200) clarityScore -= 12;
+
+    let concisenessScore = 60;
+    if (wordCount > 200) concisenessScore -= 30;
+    else if (wordCount > 150) concisenessScore -= 18;
+    else if (wordCount >= 40 && wordCount <= 100) concisenessScore += 12;
+    if (wordCount < 15) concisenessScore -= 20;
+    if (hasConstraints) concisenessScore += 6;
+    if (!hasConstraints && wordCount > 40) concisenessScore -= 6;
+
+    let creativityScore = 20 + adjectives.length * 4 + Math.min(16, uniqueKeywords * 1.5);
+    if (selectedTaskObj?.creativity_required) creativityScore += 10;
+    if (wordCount < 15) creativityScore -= 12;
+
+    let accuracyScore = 40;
+    accuracyScore += numbers.length > 0 ? 10 : 0;
+    accuracyScore += hasExamples ? 8 : 0;
+    accuracyScore += hasConstraints ? 10 : 0;
+    accuracyScore += hasTone ? 6 : 0;
+    accuracyScore += hasFormat ? 6 : 0;
+    if (!hasPurpose) accuracyScore -= 18;
+    if (wordCount < 20) accuracyScore -= 15;
+
+    const scores: FeedbackScore = {
+      clarity: clampScore(clarityScore),
+      conciseness: clampScore(concisenessScore),
+      creativity: clampScore(creativityScore),
+      accuracy: clampScore(accuracyScore),
+    };
+
+    const avgScore = Math.round((scores.clarity + scores.conciseness + scores.creativity + scores.accuracy) / 4);
+
+    const suggestionsList: string[] = [];
+    if (!hasPurpose) suggestionsList.push('Clarify the exact outcome you want (e.g., "Help me design a 3-step onboarding email sequence").');
+    if (!hasAudience) suggestionsList.push('Mention who the content is for (students, marketing managers, startup founders, etc.).');
+    if (!hasFormat) suggestionsList.push('Specify the format or deliverable (bullet list, outline, script, table, etc.).');
+    if (!hasTone) suggestionsList.push('Indicate the tone or style—formal, playful, persuasive, data-driven, etc.');
+    if (!hasConstraints) suggestionsList.push('Add constraints like length, number of ideas, time frame, or success criteria.');
+    if (wordCount < 25) suggestionsList.push('Add a bit more context or background so the AI has something specific to work with.');
+    if (wordCount > 160) suggestionsList.push('Break long prompts into shorter sentences and focus on the most important details.');
+    if (suggestionsList.length === 0) {
+      suggestionsList.push('Great prompt! Consider adding success criteria or metrics so the AI knows how to measure a good answer.');
+    }
+
+    const templateLines = [
+      `Goal: ${hasPurpose ? '✔️ Clearly stated.' : '[Describe the outcome you want the AI to produce.]'}`,
+      `Audience: ${hasAudience ? '✔️ Included.' : '[Who will use or see the result?]'}`,
+      `Context: ${hasContext ? '✔️ Adequate context provided.' : '[Add 1-2 sentences of background or current situation.]'}`,
+      `Deliverable: ${hasFormat ? '✔️ Format specified.' : '[State the format: outline, script, email, etc.]'}`,
+      `Tone/Style: ${hasTone ? '✔️ Mentioned.' : '[Describe tone: formal, playful, empathetic, data-driven…]'}`,
+      `Constraints: ${hasConstraints ? '✔️ Limits provided.' : '[Set limits: length, number of ideas, timeframe, do/don’t rules.]'}`,
+      `Examples/Evidence: ${hasExamples ? '✔️ Examples requested.' : '[Ask for examples, references, or evidence if you need them.]'}`,
+    ];
+
+    const summarySections = [
+      `🔍 Prompt analysis (${wordCount} words, ~${Math.max(1, Math.round(text.length / 4))} estimated tokens)`
+        + `\n• Objective clarity: ${hasPurpose ? 'Strong — goal detected.' : 'Missing — add a clear goal.'}`
+        + `\n• Audience specified: ${hasAudience ? 'Yes' : 'No'}`
+        + `\n• Format defined: ${hasFormat ? 'Yes' : 'No'}`
+        + `\n• Tone/style: ${hasTone ? 'Mentioned' : 'Not mentioned'}`
+        + `\n• Constraints/details: ${hasConstraints ? 'Present' : 'None detected'}`
+        + `\n• Concrete signals: ${numbers.length > 0 ? 'Includes numbers/metrics.' : 'No numeric constraints yet.'}`,
+      '',
+      `Scores → Clarity ${scores.clarity}/100 | Conciseness ${scores.conciseness}/100 | Creativity ${scores.creativity}/100 | Precision ${scores.accuracy}/100 (avg ${avgScore})`,
+      '',
+      suggestionsList.length > 0 ? `Top improvement ideas:\n- ${suggestionsList.slice(0, 3).join('\n- ')}` : '',
+      '',
+      'Prompt upgrade checklist:',
+      templateLines.map(line => `• ${line}`).join('\n'),
+    ].filter(Boolean);
+
+    const analysisSummary = summarySections.join('\n');
+
+    const xpGain = Math.max(8, Math.round(avgScore / 5));
+    const tokens = Math.max(1, Math.round(text.length / 4));
+
+    return {
+      scores,
+      suggestions: suggestionsList,
+      analysisSummary,
+      xpGain,
+      tokens,
+    };
+  };
+
   // Fetch tasks from Firebase
   useEffect(() => {
     fetchTasks();
@@ -78,124 +189,27 @@ export default function PromptSimulator() {
     setFeedback(null);
     setSuggestions([]);
 
-    // Simulate API call with streaming effect
-    await simulateStreamingResponse();
+    const analysis = analyzePrompt(prompt);
 
-    // Generate feedback
-    const mockFeedback: FeedbackScore = {
-      clarity: Math.floor(Math.random() * 30) + 70,
-      conciseness: Math.floor(Math.random() * 30) + 70,
-      creativity: Math.floor(Math.random() * 30) + 70,
-      accuracy: Math.floor(Math.random() * 30) + 70,
-    };
-    setFeedback(mockFeedback);
+    await streamAnalysisResponse(analysis.analysisSummary);
 
-    // Generate task-specific suggestions
-    let mockSuggestions: string[] = [];
-    
-    // Check if task has an image - provide image analysis suggestions
-    if (selectedTaskObj?.image_data) {
-      mockSuggestions = [
-        'Specify which aspects of the image to analyze (composition, colors, subjects, mood, symbolism)',
-        'Request detailed descriptions with specific visual elements',
-        'Ask for interpretations including context, meaning, or technical analysis',
-      ];
-    } else if (task.toLowerCase().includes('email') || task.toLowerCase().includes('professional')) {
-      mockSuggestions = [
-        'Specify the relationship with the recipient (colleague, client, etc.)',
-        'Add the meeting purpose and agenda details',
-        'Include your availability and preferred meeting format',
-      ];
-    } else if (task.toLowerCase().includes('marketing') || task.toLowerCase().includes('tagline')) {
-      mockSuggestions = [
-        'Define the unique value proposition of your product',
-        'Specify the target audience and their pain points',
-        'Request different styles (emotional, data-driven, playful, etc.)',
-      ];
-    } else if (task.toLowerCase().includes('explain') || task.toLowerCase().includes('complex')) {
-      mockSuggestions = [
-        'Specify what age or knowledge level to target',
-        'Request specific examples or analogies to include',
-        'Ask for interactive elements or visuals',
-      ];
-    } else if (task.toLowerCase().includes('summarize') || task.toLowerCase().includes('paragraph')) {
-      mockSuggestions = [
-        'Specify the desired length (word count or percentage of original)',
-        'Indicate which key points to prioritize',
-        'Request the tone (formal, casual, technical, etc.)',
-      ];
-    } else {
-      mockSuggestions = [
-        'Be more specific about the desired outcome',
-        'Add context about your target audience or use case',
-        'Specify the format, tone, and length you want',
-      ];
-    }
-    setSuggestions(mockSuggestions);
+    setFeedback(analysis.scores);
+    setSuggestions(analysis.suggestions);
+    setTokenUsage(analysis.tokens);
 
-    // Calculate token usage
-    const tokens = prompt.length / 4; // Simple token estimation
-    setTokenUsage(Math.floor(tokens));
-
-    // Award XP
-    const earnedXP = Math.floor(Math.random() * 50) + 50;
     setIsAnimatingXP(true);
     setTimeout(() => {
-      setXpPoints(prev => prev + earnedXP);
+      setXpPoints(prev => prev + analysis.xpGain);
       setIsAnimatingXP(false);
-    }, 500);
+    }, 400);
 
     setIsRunning(false);
   };
-
-  const simulateStreamingResponse = async () => {
-    // Generate a generic contextual response based on the task and user's prompt
-    let response = '';
-    
-    const taskLower = task.toLowerCase();
-    
-    // Check if task has an image - generate image analysis response
-    if (selectedTaskObj?.image_data) {
-      const imageAnalysisResponses = [
-        "Image Analysis:\n\nThe image appears to contain [visual elements]. Key observations include:\n\n1. [Primary subject/theme]\n2. [Composition/structure]\n3. [Color scheme/mood]\n4. [Notable details or elements]\n\nBased on your prompt requesting description, this analysis demonstrates structured visual analysis techniques.\n\n💡 Tip: Good prompts for image analysis include specific aspects like composition, subjects, mood, context, and potential interpretations.",
-        "Visual Description:\n\nThe image depicts [scene/subject]. Important features visible:\n\n• Subject: [main focus]\n• Setting: [environment/context]\n• Style: [artistic/technical approach]\n• Mood: [emotional tone]\n\nYour prompt successfully guided this structured visual analysis.\n\nBest practices: Be specific about what aspects to analyze - composition, colors, subjects, symbolism, or context.",
-        "Image Content Analysis:\n\nUpon careful examination:\n\n📐 Composition: [structural elements]\n🎨 Visual Elements: [colors, shapes, patterns]\n🎭 Subject Matter: [what's depicted]\n💡 Interpretation: [meaning or purpose]\n\nThe analysis follows your prompt's instructions for detailed visual description.\n\nPrompt engineering tip: Specify whether you want artistic critique, technical analysis, or narrative interpretation."
-      ];
-      response = imageAnalysisResponses[Math.floor(Math.random() * imageAnalysisResponses.length)];
-    } else if (taskLower.includes('email') || taskLower.includes('professional')) {
-      const emailResponses = [
-        "Subject: Meeting Request - [Your Topic]\n\nDear [Name],\n\nI hope this message finds you well. I am writing to request a meeting to discuss [brief purpose]. I believe this conversation would be valuable for [specific reason].\n\nI am available at your convenience and would appreciate the opportunity to connect.\n\nBest regards,\n[Your Name]",
-        "Dear [Name],\n\nThank you for your time. I would like to schedule a meeting to discuss [topic]. Please let me know your availability for the coming week.\n\nLooking forward to hearing from you.\n\nBest regards"
-      ];
-      response = emailResponses[Math.floor(Math.random() * emailResponses.length)];
-    } else if (taskLower.includes('marketing') || taskLower.includes('tagline')) {
-      const taglineResponses = [
-        "Here are 5 powerful marketing taglines:\n\n1. 'Innovate. Elevate. Dominate.' - Bold and action-oriented\n2. 'Where Ideas Meet Impact' - Professional and inspiring\n3. 'Transform Tomorrow Today' - Progressive and forward-thinking\n4. 'Built for the Future' - Simple and trustworthy\n5. 'Your Vision. Our Innovation.' - Partnership-focused",
-        "Marketing Taglines:\n\n• 'Experience the Difference'\n• 'Beyond Boundaries'\n• 'Precision Meets Performance'\n• 'Redefining Excellence'\n• 'Your Success, Our Mission'"
-      ];
-      response = taglineResponses[Math.floor(Math.random() * taglineResponses.length)];
-    } else if (taskLower.includes('explain') || taskLower.includes('complex')) {
-      const explanationResponses = [
-        "Imagine [complex topic] is like [simple analogy]. Just like how [analogy example], [topic] works by [simple explanation]. The main idea is that [key point], and it's important because [why it matters]. Think of it like when you were 10 - [child-friendly example].",
-        "Let me break this down simply: [Topic] is basically [simple definition]. Think of it like [everyday example]. What makes it special is that [key feature], which is kind of like [relatable comparison]. So in simple terms, [summary in plain language]."
-      ];
-      response = explanationResponses[Math.floor(Math.random() * explanationResponses.length)];
-    } else if (taskLower.includes('summarize') || taskLower.includes('paragraph')) {
-      const summaryResponses = [
-        "AI is reshaping industries by revolutionizing how we work, communicate, and solve problems across healthcare, autonomous vehicles, and other sectors.",
-        "Artificial Intelligence transforms work and communication, advancing diagnostics in healthcare and autonomous vehicle technology."
-      ];
-      response = summaryResponses[Math.floor(Math.random() * summaryResponses.length)];
-    } else {
-      // Generic response that works for any task
-      response = `Based on your task: "${task}", here's a generated response:\n\n${prompt ? `Your prompt: "${prompt}"\n\n` : ''}[Sample output based on your task. This demonstrates how AI models can generate relevant content based on clear instructions. For optimal results, provide specific context, desired format, and target audience in your prompts.]`;
-    }
-
-    // Simulate streaming effect
+  const streamAnalysisResponse = async (text: string) => {
     let currentOutput = '';
-    for (let i = 0; i < response.length; i++) {
-      await new Promise(resolve => setTimeout(resolve, 20));
-      currentOutput += response[i];
+    for (let i = 0; i < text.length; i++) {
+      await new Promise(resolve => setTimeout(resolve, 15));
+      currentOutput += text[i];
       setModelOutput(currentOutput);
     }
   };
