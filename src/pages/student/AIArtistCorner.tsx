@@ -20,9 +20,8 @@ import {
 } from 'lucide-react';
 import Card from '../../components/Card';
 import CommunityChallenges from '../../components/CommunityChallenges';
-import { db, storage } from '../../lib/firebase';
+import { db } from '../../lib/firebase';
 import { collection, getDocs, addDoc, doc, updateDoc, arrayUnion, arrayRemove, query, orderBy, limit, getDoc, setDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useUser } from '../../contexts/UserContext';
 import type { User } from 'firebase/auth';
 
@@ -826,34 +825,11 @@ function CreatePostModal({ onClose, onPostCreated, userPoints }: { onClose: () =
   };
 
   const handleImageUpload = async (file: File) => {
-    // Compress image first
+    // Compress image first, then encode to base64.
+    // Firebase Storage uploads are disabled in production due to CORS restrictions,
+    // so we always store artwork inline with the post record.
     const compressedFile = await compressImage(file);
-    
-    // Try Firebase Storage first, but immediately fallback to base64 for localhost
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      console.log('Localhost detected, using base64 fallback for image storage');
-      return await convertToBase64(compressedFile);
-    }
-    
-    try {
-      const uploadTask = async () => {
-        const imageRef = ref(storage, `art-posts/${Date.now()}-${compressedFile.name}`);
-        const snapshot = await uploadBytes(imageRef, compressedFile);
-        return await getDownloadURL(snapshot.ref);
-      };
-
-      // Give Firebase upload 12s; if it fails or times out, fallback to base64
-      const downloadURL = await Promise.race([
-        uploadTask(),
-        new Promise<string>((_, reject) =>
-          setTimeout(() => reject(new Error('upload-timeout')), 12000)
-        )
-      ]);
-      return downloadURL;
-    } catch (error) {
-      console.error('Firebase Storage failed, using base64 fallback:', error);
-      return await convertToBase64(compressedFile);
-    }
+    return await convertToBase64(compressedFile);
   };
 
   const convertToBase64 = (file: File): Promise<string> => {
