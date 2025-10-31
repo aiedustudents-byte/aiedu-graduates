@@ -972,48 +972,48 @@ export default function CommunityChallenges() {
                   <p className="text-text-secondary">Submit artwork to challenges to appear on the leaderboard!</p>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-light-accent">
-                        <th className="text-left py-3 px-4 font-semibold text-text-primary">Rank</th>
-                        <th className="text-left py-3 px-4 font-semibold text-text-primary">Artist</th>
-                        <th className="text-left py-3 px-4 font-semibold text-text-primary">Challenges Won</th>
-                        <th className="text-left py-3 px-4 font-semibold text-text-primary">Total Submissions</th>
-                        <th className="text-left py-3 px-4 font-semibold text-text-primary">Points Earned</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-light-accent">
+                      <th className="text-left py-3 px-4 font-semibold text-text-primary">Rank</th>
+                      <th className="text-left py-3 px-4 font-semibold text-text-primary">Artist</th>
+                      <th className="text-left py-3 px-4 font-semibold text-text-primary">Challenges Won</th>
+                      <th className="text-left py-3 px-4 font-semibold text-text-primary">Total Submissions</th>
+                      <th className="text-left py-3 px-4 font-semibold text-text-primary">Points Earned</th>
+                    </tr>
+                  </thead>
+                  <tbody>
                       {leaderboard.map((entry, index) => (
                         <tr key={entry.userId} className="border-b border-light-accent/50 hover:bg-light-accent/20">
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
-                              {index === 0 && <Crown className="w-4 h-4 text-yellow-600" />}
-                              {index === 1 && <Star className="w-4 h-4 text-gray-400" />}
-                              {index === 2 && <Award className="w-4 h-4 text-orange-600" />}
-                              <span className="font-semibold text-text-primary">#{index + 1}</span>
-                            </div>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
-                              <div className="w-8 h-8 bg-warm-brown rounded-full flex items-center justify-center">
-                                <span className="text-white text-xs font-bold">
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2">
+                            {index === 0 && <Crown className="w-4 h-4 text-yellow-600" />}
+                            {index === 1 && <Star className="w-4 h-4 text-gray-400" />}
+                            {index === 2 && <Award className="w-4 h-4 text-orange-600" />}
+                            <span className="font-semibold text-text-primary">#{index + 1}</span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 bg-warm-brown rounded-full flex items-center justify-center">
+                              <span className="text-white text-xs font-bold">
                                   {entry.userName.charAt(0).toUpperCase()}
-                                </span>
-                              </div>
-                              <span className="font-semibold text-text-primary">{entry.userName}</span>
+                              </span>
                             </div>
-                          </td>
+                              <span className="font-semibold text-text-primary">{entry.userName}</span>
+                          </div>
+                        </td>
                           <td className="py-3 px-4 text-text-secondary">{entry.challengesWon}</td>
                           <td className="py-3 px-4 text-text-secondary">{entry.totalSubmissions}</td>
-                          <td className="py-3 px-4">
+                        <td className="py-3 px-4">
                             <span className="font-semibold text-warm-brown">{entry.pointsEarned}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
               )}
             </div>
           </Card>

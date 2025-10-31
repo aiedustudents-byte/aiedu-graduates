@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import Card from '../../components/Card';
 import { db } from '../../lib/firebase';
 import { addDoc, collection, doc, getDocs, increment, limit, orderBy, query, Timestamp, updateDoc, where } from 'firebase/firestore';
@@ -66,7 +66,10 @@ export default function WellnessCorner() {
   const [currentTarget, setCurrentTarget] = useState<MoodType>('joy');
   const [memSequence, setMemSequence] = useState<MoodType[]>([]);
   const [memInputIndex, setMemInputIndex] = useState(0);
-  const [showSequence, setShowSequence] = useState(false);
+  const [isShowingSequence, setIsShowingSequence] = useState(false);
+  const [sequenceAnimKey, setSequenceAnimKey] = useState(0);
+  const [inputFeedback, setInputFeedback] = useState<'correct' | 'wrong' | null>(null);
+  const sequenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { user, loading } = useUser();
 
   const vibeScore = useMemo(() => {
@@ -181,10 +184,87 @@ export default function WellnessCorner() {
   function guessMood(m: MoodType) { if (!showGame || gameType!=='guess') return; if (m===currentTarget) setGameScore(s=>s+1); setGameRound(r=>r+1); }
 
   // Game: memory
-  function startMemoryGame() { const keys=moodEmojis.map(m=>m.key); const first=keys[Math.floor(Math.random()*keys.length)] as MoodType; setMemSequence([first]); setMemInputIndex(0); setShowSequence(true); setTimeout(()=>setShowSequence(false),1200); }
-  function extendSequence() { const keys=moodEmojis.map(m=>m.key); const next=keys[Math.floor(Math.random()*keys.length)] as MoodType; const seq=[...memSequence,next]; setMemSequence(seq); setMemInputIndex(0); setShowSequence(true); setTimeout(()=>setShowSequence(false),1200*seq.length); }
-  function handleMemoryClick(m: MoodType) { if (showSequence||!showGame||gameType!=='memory') return; if (m===memSequence[memInputIndex]) { if (memInputIndex+1===memSequence.length) { setGameScore(s=>s+1); if (memSequence.length>=4) { endGame(); } else { extendSequence(); } } else { setMemInputIndex(i=>i+1); } } else { setMemInputIndex(0); setShowSequence(true); setTimeout(()=>setShowSequence(false),1200*memSequence.length); } }
-  async function endGame() { await awardPoints(MOOD_POINTS.activity); setShowGame(false); setGameRound(0); setGameScore(0); setMemSequence([]); }
+  const previewSequence = (length: number) => {
+    if (sequenceTimeoutRef.current) {
+      clearTimeout(sequenceTimeoutRef.current);
+    }
+    const duration = 3000 + Math.max(0, length - 1) * 500;
+    setIsShowingSequence(true);
+    setSequenceAnimKey((k) => k + 1);
+    setInputFeedback(null);
+    sequenceTimeoutRef.current = setTimeout(() => {
+      setIsShowingSequence(false);
+      sequenceTimeoutRef.current = null;
+    }, duration);
+  };
+
+  useEffect(() => () => {
+    if (sequenceTimeoutRef.current) {
+      clearTimeout(sequenceTimeoutRef.current);
+    }
+  }, []);
+
+  function startMemoryGame() {
+    const keys = moodEmojis.map((m) => m.key);
+    const first = keys[Math.floor(Math.random() * keys.length)] as MoodType;
+    setMemSequence([first]);
+    setMemInputIndex(0);
+    previewSequence(1);
+  }
+
+  function extendSequence() {
+    const keys = moodEmojis.map((m) => m.key);
+    const next = keys[Math.floor(Math.random() * keys.length)] as MoodType;
+    const seq = [...memSequence, next];
+    setMemSequence(seq);
+    setMemInputIndex(0);
+    previewSequence(seq.length);
+  }
+
+  function handleMemoryClick(m: MoodType) {
+    if (isShowingSequence || !showGame || gameType !== 'memory' || memSequence.length === 0) return;
+
+    const expected = memSequence[memInputIndex];
+    const isCorrect = m === expected;
+    setInputFeedback(isCorrect ? 'correct' : 'wrong');
+
+    if (isCorrect) {
+      if (memInputIndex + 1 === memSequence.length) {
+        setGameScore((s) => s + 1);
+        const handleNext = () => {
+          if (memSequence.length >= 4) {
+            endGame(true);
+          } else {
+            extendSequence();
+          }
+        };
+        setTimeout(handleNext, 1200);
+      } else {
+        setMemInputIndex((i) => i + 1);
+      }
+    } else {
+      setMemInputIndex(0);
+      setTimeout(() => {
+        previewSequence(memSequence.length);
+      }, 800);
+    }
+  }
+
+  async function endGame(addPoints = true) {
+    if (sequenceTimeoutRef.current) {
+      clearTimeout(sequenceTimeoutRef.current);
+      sequenceTimeoutRef.current = null;
+    }
+    setIsShowingSequence(false);
+    setInputFeedback(null);
+    if (addPoints) {
+      await awardPoints(MOOD_POINTS.activity);
+    }
+    setShowGame(false);
+    setGameRound(0);
+    setGameScore(0);
+    setMemSequence([]);
+  }
 
   return (
     <div className="space-y-8">
@@ -255,7 +335,107 @@ export default function WellnessCorner() {
       {showQuiz && (<div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4"><div className="relative max-w-xl w-full rounded-xl bg-white shadow-xl p-6"><button type="button" onClick={()=>setShowQuiz(false)} className="absolute top-3 right-3 w-8 h-8 rounded-full bg-light-accent/60 hover:bg-light-accent text-dark-primary flex items-center justify-center" aria-label="Close quiz">×</button>{!isQuizDone ? (<><h3 className="text-lg font-semibold mb-3">Question {quizIndex+1} / {quizBank.length}</h3><p className="mb-4 text-dark-primary">{quizBank[quizIndex].q}</p><div className="space-y-2">{quizBank[quizIndex].options.map((opt,i)=>(<button key={i} type="button" onClick={()=>submitQuizChoice(i)} className="w-full text-left px-4 py-2 rounded-lg border border-light-accent hover:bg-light-accent/20">{opt}</button>))}</div><div className="mt-4 text-sm text-text-secondary">Score: {quizScore}</div></>) : (<div className="text-center"><h3 className="text-xl font-bold text-warm-brown mb-2">Great job!</h3><p className="mb-4">You scored {quizScore}/{quizBank.length}. +5 points added.</p><button type="button" onClick={endQuiz} className="px-4 py-2 bg-warm-brown text-white rounded-lg">Close</button></div>)}</div></div>)}
 
       {/* Game modal */}
-      {showGame && (<div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4"><div className="relative max-w-xl w-full rounded-xl bg-white shadow-xl p-6"><button type="button" onClick={()=>setShowGame(false)} className="absolute top-3 right-3 w-8 h-8 rounded-full bg-light-accent/60 hover:bg-light-accent text-dark-primary flex items-center justify-center" aria-label="Close game">×</button>{gameType==='guess' ? (<><h3 className="text-lg font-semibold mb-3">Guess the Expression</h3><div className="text-7xl text-center mb-4">{moodEmojis.find(m=>m.key===currentTarget)?.emoji}</div><p className="text-center text-sm text-text-secondary mb-4">Round {gameRound+1} • Score {gameScore}</p><div className="grid grid-cols-2 gap-2">{moodEmojis.map(m=>(<button key={m.key} type="button" onClick={()=>guessMood(m.key)} className="px-4 py-2 rounded-lg border border-light-accent hover:bg-light-accent/20">{m.label}</button>))}</div>{gameRound>=5 && (<div className="text-center mt-4"><p className="mb-2">Nice! +5 points added.</p><button type="button" onClick={endGame} className="px-4 py-2 bg-warm-brown text-white rounded-lg">Close</button></div>)}</>) : (<><h3 className="text-lg font-semibold mb-3">Mood Memory</h3><p className="text-center text-sm text-text-secondary mb-2">Watch the sequence, then repeat it.</p><div className="flex items-center justify-center gap-2 my-4">{memSequence.map((m,i)=>(<div key={i} className={`text-4xl ${showSequence?'':'opacity-60'}`}>{moodEmojis.find(x=>x.key===m)?.emoji}</div>))}</div><p className="text-center text-sm text-text-secondary mb-4">Score {gameScore}</p><div className="grid grid-cols-2 gap-2">{moodEmojis.map(m=>(<button key={m.key} type="button" onClick={()=>handleMemoryClick(m.key)} className="px-4 py-2 rounded-lg border border-light-accent hover:bg-light-accent/20">{m.label}</button>))}</div></>)}</div></div>)}
+      {showGame && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="relative max-w-xl w-full rounded-xl bg-white shadow-xl p-6">
+            <button
+              type="button"
+              onClick={() => setShowGame(false)}
+              className="absolute top-3 right-3 w-8 h-8 rounded-full bg-light-accent/60 hover:bg-light-accent text-dark-primary flex items-center justify-center"
+              aria-label="Close game"
+            >
+              ×
+            </button>
+            {gameType === 'guess' ? (
+              <>
+                <h3 className="text-lg font-semibold mb-3">Guess the Expression</h3>
+                <div className="text-7xl text-center mb-4">{moodEmojis.find(m => m.key === currentTarget)?.emoji}</div>
+                <p className="text-center text-sm text-text-secondary mb-4">Round {gameRound + 1} • Score {gameScore}</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {moodEmojis.map(m => (
+                    <button key={m.key} type="button" onClick={() => guessMood(m.key)} className="px-4 py-2 rounded-lg border border-light-accent hover:bg-light-accent/20">
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+                {gameRound >= 5 && (
+                  <div className="text-center mt-4">
+                    <p className="mb-2">Nice! +5 points added.</p>
+                    <button type="button" onClick={() => endGame(true)} className="px-4 py-2 bg-warm-brown text-white rounded-lg">
+                      Close
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <h3 className="text-lg font-semibold mb-3">Mood Memory</h3>
+                <p className="text-center text-sm text-text-secondary mb-2">Watch the sequence, then repeat it.</p>
+                <div className="flex items-center justify-center gap-2 my-4 h-20">
+                  <AnimatePresence mode="wait">
+                        {isShowingSequence ? (
+                      <motion.div
+                        key={`sequence-${sequenceAnimKey}`}
+                        className="flex items-center gap-2"
+                        initial={{ opacity: 0, y: 30 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -40 }}
+                        transition={{ duration: 0.4 }}
+                      >
+                        {memSequence.map((m, i) => (
+                          <motion.div
+                            key={`${sequenceAnimKey}-${i}`}
+                            className="text-4xl"
+                            initial={{ opacity: 0, y: 30 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: i * 0.2 }}
+                          >
+                            {moodEmojis.find(x => x.key === m)?.emoji}
+                          </motion.div>
+                        ))}
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        key={`placeholders-${memSequence.length}-${inputFeedback}`}
+                        className="flex items-center gap-2"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                      >
+                        {memSequence.map((_, i) => (
+                          <span
+                            key={i}
+                            className={`text-4xl transition-colors duration-300 ${
+                              inputFeedback === 'wrong' && i === memInputIndex
+                                ? 'text-red-500'
+                                : inputFeedback === 'correct' && i < memInputIndex
+                                ? 'text-green-500'
+                                : 'text-medium-gray'
+                            }`}
+                          >
+                            {inputFeedback === 'correct' && i < memInputIndex
+                              ? moodEmojis.find(x => x.key === memSequence[i])?.emoji
+                              : '?'}
+                          </span>
+                        ))}
+                        {memSequence.length === 0 && <span className="text-sm text-text-secondary">Sequence ready!</span>}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+                <p className="text-center text-sm text-text-secondary mb-4">Score {gameScore}</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {moodEmojis.map(m => (
+                    <button key={m.key} type="button" onClick={() => handleMemoryClick(m.key)} className="px-4 py-2 rounded-lg border border-light-accent hover:bg-light-accent/20">
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
